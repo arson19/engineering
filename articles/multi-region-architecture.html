@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="A practical framework for thinking about multi-region application availability and disaster recovery."><title>Thinking Through Multi-Region Architecture | Engineering by Prabhav</title><link rel="stylesheet" href="../assets/style.css"></head>
+<body><header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">P</span><span>Engineering <b>by Prabhav</b></span></a><nav><a href="../index.html#articles">Articles</a><a href="../index.html#about">About</a><a href="https://github.com/arson19" target="_blank" rel="noreferrer">GitHub ↗</a></nav></header>
+<main class="article-shell"><a class="back" href="../index.html#articles">← All articles</a><div class="article-kicker eyebrow">CLOUD · RELIABILITY ENGINEERING</div><h1>Thinking Through Multi-Region Architecture</h1><p class="dek">A practical framework for reasoning about regional failures, traffic routing, data replication and disaster recovery.</p><div class="article-rule"></div>
+<article class="article-content">
+<p>Running an application in more than one cloud region can improve resilience, but simply deploying the same resources twice does not create high availability. A multi-region design needs clear failure assumptions, a traffic strategy, a data recovery plan and operational procedures that have been exercised.</p>
+<h2>Start with the failure model</h2>
+<p>Before choosing active-active or active-passive, identify what the system is expected to survive. Examples include an application process failure, a cluster outage, a regional network issue, a regional cloud service disruption or a data-store failure. Each failure has a different detection and recovery path.</p>
+<p>Define recovery objectives with stakeholders:</p>
+<ul><li><b>RTO (Recovery Time Objective):</b> the maximum acceptable time to restore service.</li><li><b>RPO (Recovery Point Objective):</b> the maximum acceptable amount of data loss measured in time.</li></ul>
+<p>These objectives influence replication mode, backup frequency, routing behaviour and the amount of infrastructure kept ready in a secondary region.</p>
+<h2>A reference architecture</h2>
+<div class="diagram"><div class="flow"><span class="node">Global traffic manager</span><span class="arrow">→</span><span class="node">Region A<br>App + data</span><span class="arrow">⇄</span><span class="node">Region B<br>App + data</span></div></div>
+<p>A global entry point can route requests to regional application stacks. Each region may contain its own ingress, application workloads, cache and supporting services. The data layer needs an explicit replication and failover design; it should not be assumed that application redundancy automatically makes data highly available.</p>
+<h2>Choose a traffic strategy deliberately</h2>
+<h3>Active-passive</h3>
+<p>One region serves normal traffic while another is maintained as a recovery target. This can reduce operational complexity and cost, but failover may take longer and the secondary region must be tested regularly to ensure capacity and configuration are ready.</p>
+<h3>Active-active</h3>
+<p>Multiple regions serve traffic concurrently. This can improve latency and availability, but introduces complexity around data consistency, session handling, duplicate processing, regional capacity and conflict resolution.</p>
+<p>Neither pattern is universally better. The right choice depends on workload behaviour, data characteristics, recovery objectives and operational maturity.</p>
+<h2>Data replication is often the hardest part</h2>
+<p>Ask whether writes can happen in multiple regions, whether the database supports the desired replication topology, and what happens during a network partition. Understand replication lag, consistency guarantees, conflict handling and the process for promoting a replica. For relational databases, test not only failover but also connection-string changes, connection pool recovery and application retry behaviour.</p>
+<div class="callout">A replica is not a backup. Retain independent backups and test restore procedures. Replication can faithfully copy accidental deletes or corrupted data.</div>
+<h2>Make the application region-aware</h2>
+<ul><li>Avoid relying on in-memory session state tied to one region.</li><li>Use idempotency keys for operations that may be retried after uncertain network outcomes.</li><li>Make background jobs safe against duplicate delivery.</li><li>Define how caches are warmed or invalidated after failover.</li><li>Use bounded retries with backoff and jitter to avoid amplifying an outage.</li><li>Ensure health checks distinguish process liveness from the ability to serve meaningful traffic.</li></ul>
+<h2>Plan the failover sequence</h2>
+<ol><li>Detect and classify the failure using health signals and service-level indicators.</li><li>Determine whether the secondary region and its dependencies are healthy.</li><li>Confirm data replication state and the expected recovery point.</li><li>Promote the data tier if required, following the documented runbook.</li><li>Shift traffic through the global routing layer.</li><li>Verify application errors, latency, dependency connectivity and critical user journeys.</li><li>Communicate status and preserve evidence for the post-incident review.</li></ol>
+<h2>Test recovery, not just deployment</h2>
+<p>A deployment test proves that resources can be created. A disaster recovery exercise proves that the service can recover under a defined failure. Run controlled drills that test regional isolation, traffic changes, data promotion, application reconnection, background processing and restoration to the preferred topology.</p>
+<p>Record actual recovery time, data loss, manual steps, alert quality and unexpected dependencies. Convert gaps into engineering work and repeat the exercise after significant architecture changes.</p>
+<h2>Common design traps</h2>
+<ul><li>Deploying two regions but keeping a single-region database or queue as a hidden dependency.</li><li>Assuming DNS or global routing changes are instantaneous.</li><li>Failing to account for connection pools that retain stale endpoints.</li><li>Allowing both regions to process the same scheduled job without coordination.</li><li>Testing failover but never testing failback.</li><li>Keeping the secondary region undersized without a tested scale-up plan.</li></ul>
+<h2>Takeaway</h2>
+<p>Multi-region architecture is an operational capability, not just a topology diagram. Start with RTO and RPO, map dependencies, make data behaviour explicit, automate repeatable recovery steps and regularly test the complete service path. The strongest design is the one the team can operate confidently during a real failure.</p>
+</article><div class="article-footer"><a class="back" href="../index.html#articles">← Back to the engineering knowledge base</a></div></main><footer><span>© Engineering by Prabhav</span><span>Practical engineering knowledge, openly shared.</span></footer></body></html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="A practical guide to turning repeated Kubernetes manifests into reusable Helm charts."><title>From Kubernetes YAML to Helm Charts | Engineering by Prabhav</title><link rel="stylesheet" href="../assets/style.css"></head>
+<body><header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">P</span><span>Engineering <b>by Prabhav</b></span></a><nav><a href="../index.html#articles">Articles</a><a href="../index.html#about">About</a><a href="https://github.com/arson19" target="_blank" rel="noreferrer">GitHub ↗</a></nav></header>
+<main class="article-shell"><a class="back" href="../index.html#articles">← All articles</a><div class="article-kicker eyebrow">KUBERNETES · DEPLOYMENT ENGINEERING</div><h1>From Kubernetes YAML to Helm Charts</h1><p class="dek">How to move from copy-pasted manifests to reusable, configurable deployment packages — without losing control of what reaches a cluster.</p><div class="article-rule"></div>
+<article class="article-content">
+<p>Kubernetes manifests describe the desired state of an application. A Deployment defines pods and rollout behaviour, a Service provides stable networking, and ConfigMaps hold non-sensitive configuration. For a small application, a few YAML files are easy to manage.</p>
+<p>The challenge appears when the same application must run in multiple environments or for multiple customers. Small differences accumulate: image tags, replica counts, resource limits, hostnames, feature flags and environment-specific settings. Copying entire manifests for every variation creates drift and makes upgrades harder to reason about.</p>
+<h2>Why raw manifests become difficult to maintain</h2>
+<ul><li><b>Duplication:</b> the same Deployment is repeated with only a few values changed.</li><li><b>Configuration drift:</b> a security or reliability fix is applied to one copy but missed in another.</li><li><b>Review overhead:</b> reviewers must distinguish meaningful changes from environment-specific noise.</li><li><b>Release complexity:</b> coordinating a consistent application version across environments becomes harder.</li></ul>
+<div class="callout">The goal is not to template every field. The goal is to identify the small set of values that legitimately varies, while keeping safe defaults and operational behaviour consistent.</div>
+<h2>What Helm adds</h2>
+<p><a href="https://helm.sh/" target="_blank" rel="noreferrer">Helm</a> packages Kubernetes resources into a chart. Templates describe the resources, while a values file supplies configuration for a particular installation. A chart can be versioned, reviewed and installed repeatedly.</p>
+<div class="diagram"><div class="flow"><span class="node">Chart templates</span><span class="arrow">+</span><span class="node">values.yaml</span><span class="arrow">→</span><span class="node">Rendered manifests</span><span class="arrow">→</span><span class="node">Kubernetes</span></div></div>
+<h2>A minimal chart structure</h2>
+<pre>sample-service/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── deployment.yaml
+    └── service.yaml</pre>
+<p><code>Chart.yaml</code> describes the chart. <code>values.yaml</code> contains defaults. Files under <code>templates/</code> are rendered using those values.</p>
+<h3>Define sensible defaults</h3>
+<pre>replicaCount: 2
+
+image:
+  repository: nginx
+  tag: "1.27"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi</pre>
+<p>These values are examples for a small demonstration service. Production values should be chosen from measured application requirements and cluster capacity.</p>
+<h3>Template the Deployment</h3>
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}</pre>
+<h2>Make environment differences explicit</h2>
+<p>Keep common defaults in <code>values.yaml</code> and add small override files for environments. For example, a development override might use one replica, while a production override might increase replicas and set stricter resource requests. Avoid copying the full chart for each environment.</p>
+<pre># values-prod.yaml
+replicaCount: 3
+
+image:
+  tag: "1.27.1"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi</pre>
+<h2>Validate before applying</h2>
+<p>Helm makes rendering repeatable, but it does not remove the need for validation. A practical workflow includes:</p>
+<ol><li>Lint the chart with <code>helm lint ./sample-service</code>.</li><li>Render manifests with <code>helm template demo ./sample-service -f values-prod.yaml</code>.</li><li>Review the rendered resources and run policy or schema checks used by your team.</li><li>Deploy to a non-production namespace and verify readiness, service routing and application behaviour.</li><li>Promote the same chart version with environment-specific values.</li></ol>
+<h2>Operational considerations</h2>
+<ul><li>Use readiness and liveness probes that reflect the application's actual health.</li><li>Set resource requests and limits based on observed usage, not arbitrary copy-paste values.</li><li>Keep secrets out of chart values committed to source control. Reference an approved secret-management mechanism instead.</li><li>Use immutable image tags or digests for reproducible releases.</li><li>Document chart inputs and supported Kubernetes versions.</li><li>Plan chart upgrades and rollbacks; a successful Helm command alone does not prove application health.</li></ul>
+<h2>When Helm is not the answer</h2>
+<p>For a tiny application deployed once, plain manifests may be simpler. Helm becomes useful when packaging, repeatable installation, versioning and controlled configuration are real requirements. Kustomize is another option when environment overlays are the primary need.</p>
+<h2>Takeaway</h2>
+<p>Moving from raw YAML to Helm is less about introducing another tool and more about creating a reliable deployment contract. Keep templates small, make configuration intentional, validate rendered output and treat chart versions as release artifacts.</p>
+<div class="callout">Try it yourself: create a chart for a small HTTP service, add development and production values, render both, and compare the output. Keep the example independent of any employer or customer environment.</div>
+</article><div class="article-footer"><a class="back" href="../index.html#articles">← Back to the engineering knowledge base</a></div></main><footer><span>© Engineering by Prabhav</span><span>Practical engineering knowledge, openly shared.</span></footer></body></html>

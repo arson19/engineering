@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Design a canary deployment workflow with staged rollout, validation gates and rollback."><title>Building a Canary Deployment Pipeline | Engineering by Prabhav</title><link rel="stylesheet" href="../assets/style.css"></head>
+<body><header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">P</span><span>Engineering <b>by Prabhav</b></span></a><nav><a href="../index.html#articles">Articles</a><a href="../index.html#about">About</a><a href="https://github.com/arson19" target="_blank" rel="noreferrer">GitHub ↗</a></nav></header>
+<main class="article-shell"><a class="back" href="../index.html#articles">← All articles</a><div class="article-kicker eyebrow">CI/CD · RELEASE ENGINEERING</div><h1>Building a Canary Deployment Pipeline</h1><p class="dek">A practical approach to introducing a new application version gradually, validating it with meaningful signals and keeping rollback paths clear.</p><div class="article-rule"></div>
+<article class="article-content">
+<p>A deployment pipeline should do more than copy a container image into a cluster. It should make a release repeatable, provide evidence that the new version is healthy, and stop promotion when the evidence is not good enough.</p>
+<p>A canary release introduces a new version to a limited slice of traffic or capacity before expanding the rollout. This reduces the blast radius of a faulty release, but it does not eliminate risk. The quality of the validation signals and rollback procedure matters as much as the deployment mechanism.</p>
+<h2>Separate the pipeline into clear stages</h2>
+<div class="diagram"><div class="flow"><span class="node">Build & test</span><span class="arrow">→</span><span class="node">Publish image</span><span class="arrow">→</span><span class="node">Deploy canary</span><span class="arrow">→</span><span class="node">Validate</span><span class="arrow">→</span><span class="node">Promote</span></div></div>
+<ol><li><b>Build:</b> install dependencies, run unit tests, static checks and security scans.</li><li><b>Package:</b> build a container image and publish it with an immutable identifier.</li><li><b>Provision:</b> prepare the target environment using version-controlled infrastructure definitions.</li><li><b>Deploy:</b> deploy the candidate version to a canary workload.</li><li><b>Validate:</b> run smoke tests and inspect health, latency and error signals.</li><li><b>Promote or rollback:</b> expand traffic only when gates pass; otherwise restore the stable version.</li></ol>
+<h2>What should a canary environment contain?</h2>
+<p>A useful canary environment should be representative enough to reveal release issues. Depending on the system, that can include the same application configuration, comparable dependencies, realistic network paths, observability agents and representative test traffic. Differences should be documented because they can make validation misleading.</p>
+<p>For infrastructure changes, provision the environment through the same infrastructure-as-code workflow used for the target environment. Keep environment-specific parameters separate from the pipeline logic.</p>
+<h2>Example Kubernetes rollout configuration</h2>
+<p>The following Deployment fragment demonstrates a small canary workload. It does not implement traffic splitting by itself; routing must be configured separately using an ingress controller, service mesh or another traffic-management layer.</p>
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: web
+        track: canary
+    spec:
+      containers:
+        - name: web
+          image: example/web:1.4.0
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi</pre>
+<h2>Define promotion gates before rollout</h2>
+<p>Do not rely on a single green deployment status. Establish a small set of measurable gates that fit the service:</p>
+<ul><li>Canary pods become ready within an expected time.</li><li>Smoke tests pass against the canary endpoint.</li><li>HTTP error rate remains within an agreed threshold.</li><li>Latency does not regress beyond an agreed tolerance.</li><li>Dependency health and saturation remain acceptable.</li><li>No critical alerts or unexpected restarts appear during the observation window.</li></ul>
+<div class="callout">Choose thresholds from the service's SLOs and baseline behaviour. Example numbers copied from another service can create false confidence.</div>
+<h2>Rollback should be a first-class path</h2>
+<p>A safe pipeline makes rollback explicit and testable. Keep the last known-good image and deployment configuration available. Define who or what can trigger rollback, how traffic is returned to the stable version, and how the system verifies recovery. Database schema changes require special care: prefer backward-compatible expand-and-contract migrations so an application rollback does not leave the database in an incompatible state.</p>
+<h2>Illustrative Azure Pipelines structure</h2>
+<p>The following is a conceptual YAML outline. Replace the scripts, service connections, environment names and approval configuration with values appropriate to your own sandbox.</p>
+<pre>stages:
+- stage: Build
+  jobs:
+  - job: BuildAndTest
+    steps:
+    - script: python -m pytest
+    - script: docker build -t $(imageName):$(Build.BuildId) .
+    - script: docker push $(imageName):$(Build.BuildId)
+
+- stage: Canary
+  dependsOn: Build
+  jobs:
+  - deployment: DeployCanary
+    environment: canary
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: ./scripts/deploy-canary.sh
+          - script: ./scripts/smoke-test.sh
+          - script: ./scripts/check-health.sh
+
+- stage: Promote
+  dependsOn: Canary
+  condition: succeeded()
+  jobs:
+  - deployment: PromoteRelease
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: ./scripts/promote-release.sh</pre>
+<h2>Observability makes the decision possible</h2>
+<p>Collect metrics, logs and traces with enough labels to distinguish stable and canary workloads. Compare the same time windows and traffic classes. A low-volume canary may not produce enough data for a statistically meaningful conclusion, so combine automated checks with an appropriate observation period and staged traffic increases.</p>
+<h2>Common mistakes</h2>
+<ul><li>Calling a separate test cluster a canary without routing representative traffic to it.</li><li>Promoting solely because Kubernetes reports the pods as ready.</li><li>Using mutable image tags such as <code>latest</code>.</li><li>Ignoring database and message-contract compatibility.</li><li>Failing to test rollback before a production incident.</li><li>Making the canary environment so different from production that its results are not representative.</li></ul>
+<h2>Takeaway</h2>
+<p>A canary pipeline is a release decision system. Build immutable artifacts, deploy in controlled stages, validate against service-specific signals and make rollback predictable. The pipeline should encode the team's release knowledge so that safer deployments do not depend on individual memory.</p>
+</article><div class="article-footer"><a class="back" href="../index.html#articles">← Back to the engineering knowledge base</a></div></main><footer><span>© Engineering by Prabhav</span><span>Practical engineering knowledge, openly shared.</span></footer></body></html>
